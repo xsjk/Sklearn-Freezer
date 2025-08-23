@@ -1,0 +1,39 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "sklearn_freezer"
+version = "0.1.0"
+description = "Utility package for compiling scikit-learn classifiers for faster single-sample inference"
+authors = [{ name = "xsjk", email = "xsjk17@outlook.com" }]
+readme = "README.md"
+license = "MIT"
+classifiers = [
+    "Development Status :: 2 - Pre-Alpha",
+    "Environment :: Console",
+    "Intended Audience :: Developers",
+    "Intended Audience :: Science/Research",
+    "Natural Language :: English",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: Software Development :: Libraries :: Python Modules",
+    "Topic :: Utilities",
+    "Typing :: Typed",
+]
+requires-python = ">=3.10"
+dependencies = ["scikit-learn"]
+
+[project.optional-dependencies]
+python = []
+cython = ["cython"]
+c = ["setuptools"]
+all = ["cython", "setuptools"]
+
+[project.urls]
+Homepage = "https://github.com/xsjk/Sklearn-Freezer"
+Repository = "https://github.com/xsjk/Sklearn-Freezer"
