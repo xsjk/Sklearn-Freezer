@@ -1,10 +1,8 @@
-from typing import Callable, Literal
+from typing import Callable
 
-from sklearn.tree import DecisionTreeClassifier
+from sklearn.tree import DecisionTreeClassifier as TargetModel
 
 from ..backend import c_compile, cython_compile, python_compile
-
-target_model = DecisionTreeClassifier
 
 
 def tree_to_code(return_formatter, if_formatter, indent_unit: str = "    "):
@@ -65,16 +63,25 @@ tree_to_c = tree_to_code(
 )
 
 
-def compile_predict_proba(clf: DecisionTreeClassifier, mode: Literal["python", "c", "cython"], names: list[str]) -> Callable[..., float]:
-    match mode:
-        case "python":
-            code = "def f({args}):\n{code}".format(args=", ".join(names), code=tree_to_python(clf.tree_, names, initial_depth=1))
-            return python_compile(code, "f")
-        case "c":
-            code = "inline double f({args}) {{\n{code}\n}}".format(args=", ".join(f"double {name}" for name in names), code=tree_to_c(clf.tree_, names, initial_depth=1))
-            return c_compile(code, func_name="f", arg_names=names, reuse_output=True)
-        case "cython":
-            code = "def f({args}):\n{code}".format(args=", ".join(f"double {n}" for n in names), code=tree_to_python(clf.tree_, names, initial_depth=1))
-            return cython_compile(code, func_name="f")
-        case _:
-            raise ValueError(f"Unknown model type: {mode}")
+def compile_predict_proba_python(clf: TargetModel, names: list[str]) -> Callable[..., float]:
+    code = "def f({args}):\n{code}".format(
+        args=", ".join(names),
+        code=tree_to_python(clf.tree_, names, initial_depth=1),
+    )
+    return python_compile(code, "f")
+
+
+def compile_predict_proba_cython(clf: TargetModel, names: list[str]) -> Callable[..., float]:
+    code = "def f({args}):\n{code}".format(
+        args=", ".join(f"double {n}" for n in names),
+        code=tree_to_python(clf.tree_, names, initial_depth=1),
+    )
+    return cython_compile(code, func_name="f")
+
+
+def compile_predict_proba_c(clf: TargetModel, names: list[str]) -> Callable[..., float]:
+    code = "inline double f({args}) {{\n{code}\n}}".format(
+        args=", ".join(f"double {name}" for name in names),
+        code=tree_to_c(clf.tree_, names, initial_depth=1),
+    )
+    return c_compile(code, func_name="f", arg_names=names, reuse_output=True)

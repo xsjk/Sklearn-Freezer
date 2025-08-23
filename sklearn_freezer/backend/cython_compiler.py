@@ -6,7 +6,7 @@ pyx_importer = None
 
 
 # Import pyximport dynamically to avoid requiring its installation unless cython_compiler is used
-def _get_importer():
+def get_pyx_importer():
     global pyx_importer
     if pyx_importer is None:
         try:
@@ -16,7 +16,7 @@ def _get_importer():
 
         _, pyx_importer = pyximport.install()
         assert pyx_importer is not None
-        return pyx_importer
+    return pyx_importer
 
 
 CYTHON_PREAMBLE = """
@@ -58,7 +58,7 @@ def cython_compile(code: str, func_name: str, module_name: str | None = None):
             src_path = f.name
         dirname, filename = os.path.split(src_path)
         module_name, _ = os.path.splitext(filename)
-        assert (importer := _get_importer()) is not None
+        assert (importer := get_pyx_importer()) is not None
         assert (spec := importer.find_spec(module_name, [dirname])) is not None
         assert (loader := spec.loader) is not None
         assert (module := loader.create_module(spec)) is not None

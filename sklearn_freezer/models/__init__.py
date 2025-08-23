@@ -1,8 +1,12 @@
-from typing import Literal, Callable, Any
+import importlib
+import pkgutil
+from typing import Any, Callable, Literal
 
-from . import decision_tree
-
-supported_models = {m.target_model: m for m in (decision_tree,)}
+supported_models = {}
+for _, module_name, is_pkg in pkgutil.iter_modules(__path__):
+    if not is_pkg:
+        module = importlib.import_module(f".{module_name}", package=__name__)
+        supported_models[module.TargetModel] = module
 
 
 def compile_predict_proba(clf: Any, backend: Literal["python", "c", "cython"]) -> Callable[..., float]:
@@ -34,4 +38,7 @@ def compile_predict_proba(clf: Any, backend: Literal["python", "c", "cython"]) -
     if type(clf) not in supported_models:
         raise NotImplementedError(f"Model type {type(clf)} not supported yet.")
 
-    return supported_models[type(clf)].compile_predict_proba(clf, backend, names)
+    compiler = getattr(supported_models[type(clf)], f"compile_predict_proba_{backend}", None)
+    if compiler:
+        return compiler(clf, names)
+    raise NotImplementedError(f"Compilation {type(clf).__name__} with backend {backend} not supported yet.")
