@@ -1,8 +1,4 @@
-from typing import Callable
-
 from sklearn.tree import DecisionTreeClassifier as TargetModel
-
-from ..backend import c_compile, cython_compile, python_compile
 
 
 def tree_to_code(return_formatter, if_formatter, indent_unit: str = "    "):
@@ -30,6 +26,7 @@ def tree_to_code(return_formatter, if_formatter, indent_unit: str = "    "):
     """
 
     def _tree_to_code(t, names: list[str], initial_depth=0) -> str:
+        assert t.value.ndim == 3
         if t.value.shape[2] > 2:
             raise NotImplementedError("Multi-class classification is not supported.")
 
@@ -63,25 +60,25 @@ tree_to_c = tree_to_code(
 )
 
 
-def compile_predict_proba_python(clf: TargetModel, names: list[str]) -> Callable[..., float]:
-    code = "def f({args}):\n{code}".format(
+def generate_predict_proba_python(clf: TargetModel, names: list[str], func_name: str) -> str:
+    return "def {func_name}({args}):\n{code}".format(
+        func_name=func_name,
         args=", ".join(names),
         code=tree_to_python(clf.tree_, names, initial_depth=1),
     )
-    return python_compile(code, "f")
 
 
-def compile_predict_proba_cython(clf: TargetModel, names: list[str]) -> Callable[..., float]:
-    code = "def f({args}):\n{code}".format(
+def generate_predict_proba_cython(clf: TargetModel, names: list[str], func_name: str) -> str:
+    return "cpdef double {func_name}({args}):\n{code}".format(
+        func_name=func_name,
         args=", ".join(f"double {n}" for n in names),
         code=tree_to_python(clf.tree_, names, initial_depth=1),
     )
-    return cython_compile(code, func_name="f")
 
 
-def compile_predict_proba_c(clf: TargetModel, names: list[str]) -> Callable[..., float]:
-    code = "inline double f({args}) {{\n{code}\n}}".format(
-        args=", ".join(f"double {name}" for name in names),
+def generate_predict_proba_c(clf: TargetModel, names: list[str], func_name: str) -> str:
+    return "inline double {func_name}({args}) {{\n{code}\n}}".format(
+        func_name=func_name,
+        args=", ".join(f"double {n}" for n in names),
         code=tree_to_c(clf.tree_, names, initial_depth=1),
     )
-    return c_compile(code, func_name="f", arg_names=names, reuse_output=True)

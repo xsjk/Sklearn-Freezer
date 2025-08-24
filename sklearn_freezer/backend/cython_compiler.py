@@ -1,11 +1,14 @@
 import importlib
-import os.path
+import os
 import tempfile
+from typing import Callable
+
+from . import utils
 
 pyx_importer = None
 
 
-# Import pyximport dynamically to avoid requiring its installation unless cython_compiler is used
+# Import pyximport dynamically to avoid requiring its installation unless Cython backend is used
 def get_pyx_importer():
     global pyx_importer
     if pyx_importer is None:
@@ -30,7 +33,7 @@ CYTHON_PREAMBLE = """
 """
 
 
-def cython_compile(code: str, func_name: str, module_name: str | None = None):
+def compile(code: str, func_name: str, module_name: str | None = None) -> Callable:
     """
     Compile the given Cython code.
 
@@ -56,13 +59,8 @@ def cython_compile(code: str, func_name: str, module_name: str | None = None):
         with tempfile.NamedTemporaryFile(suffix=".pyx", delete=False) as f:
             f.write(code.encode())
             src_path = f.name
-        dirname, filename = os.path.split(src_path)
-        module_name, _ = os.path.splitext(filename)
-        assert (importer := get_pyx_importer()) is not None
-        assert (spec := importer.find_spec(module_name, [dirname])) is not None
-        assert (loader := spec.loader) is not None
-        assert (module := loader.create_module(spec)) is not None
-        loader.exec_module(module)
+        dir_name, module_name, _ = utils.split_path(src_path)
+        module = utils.import_module_from_dir(module_name, dir_name, get_pyx_importer())
         os.remove(src_path)
     else:
         with open(f"{module_name}.pyx", "w") as f:

@@ -1,8 +1,9 @@
 import ast
-from typing import Any
+import builtins
+from typing import Callable
 
 
-def python_compile(code: str, func_name: str) -> Any:
+def compile(code: str, func_name: str) -> Callable:
     """
     Compile Python code into a function.
 
@@ -21,5 +22,5 @@ def python_compile(code: str, func_name: str) -> Any:
     Any
         The compiled function.
     """
-    exec(compile(ast.parse(code), filename="<string>", mode="exec"), g := {})
+    exec(builtins.compile(ast.parse(code), filename="<string>", mode="exec"), g := {})
     return g[func_name]
