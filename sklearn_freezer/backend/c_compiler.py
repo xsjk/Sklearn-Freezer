@@ -29,6 +29,20 @@ def get_n_args_from_code(code: str, func_name: str, return_type: str, arg_type: 
     return len(re.findall(rf"\b{arg_type}\b", param_list))
 
 
+# Ignore the warning about the function signature of _PyCFunctionFast differs from PyCFunction
+C_PREAMBLE = """
+#if defined(_MSC_VER)
+#pragma warning(disable: 4113) 
+#endif
+
+#if defined(__GNUC__) || defined(__clang__)
+#pragma GCC diagnostic ignored "-Wincompatible-pointer-types"
+#endif
+
+#include <Python.h>
+"""
+
+
 def compile(code: str, func_name: str, module_name: str | None = None, reuse_output: bool = True) -> FloatCallable:
     """
     Compile the provided C code into a callable Python function.
@@ -69,7 +83,7 @@ def compile(code: str, func_name: str, module_name: str | None = None, reuse_out
     # Assume the return type is double and argument types are double
     num_args = get_n_args_from_code(code, func_name, return_type="double", arg_type="double")
 
-    code = f"#include <Python.h>\n\n{code}\n\n"
+    code = f"{C_PREAMBLE}\n\n{code}\n\n"
     if reuse_output:
         code += f"static PyObject* {func_name}_cache;\n\n"
     code += "#define AsDouble(o) (((PyFloatObject*)(o))->ob_fval)\n"
@@ -82,27 +96,25 @@ def compile(code: str, func_name: str, module_name: str | None = None, reuse_out
     else:
         code += "    return PyFloat_FromDouble(result);\n"
     code += "}\n"
-    code += f'static PyMethodDef MyMethods[] = {{{{ "{func_name}", {func_name}_wrapper, METH_FASTCALL, NULL }}}};\n'
+    code += "static PyMethodDef MyMethods[] = {\n"
+    code += f'    {{ "{func_name}", {func_name}_wrapper, METH_FASTCALL, NULL }},\n'
+    code += "    { NULL, NULL, 0, NULL }\n"
+    code += "};\n"
 
-    epilogue = 'static struct PyModuleDef {module_name} = {{ PyModuleDef_HEAD_INIT, "{module_name}", NULL, 1, MyMethods }};\n'
+    epilogue = 'static struct PyModuleDef {module_name} = {{ PyModuleDef_HEAD_INIT, "{module_name}", NULL, -1, MyMethods }};\n'
     epilogue += "PyMODINIT_FUNC PyInit_{module_name}(void) {{ \n"
     if reuse_output:
         epilogue += f"    {func_name}_cache = PyFloat_FromDouble(0.0);\n"
     epilogue += "    return PyModule_Create(&{module_name});\n"
     epilogue += "}}\n"
 
-    compile_flags = [
-        "-ffast-math",
-        "-Wno-incompatible-pointer-types",  # the function signature of _PyCFunctionFast differs from PyCFunction
-    ]
-
     if module_name is None:
         with tempfile.NamedTemporaryFile(suffix=".c", delete=False) as f:
             dir_name, module_name, _ = utils.split_path(src_path := f.name)
             code += epilogue.format(module_name=module_name)
             f.write(code.encode())
-        extension = Extension(module_name, sources=[src_path], extra_compile_args=compile_flags)
-        silent_setup(name=module_name, ext_modules=[extension], script_args=["build_ext", "-b", dir_name])
+        extension = Extension(module_name, sources=[src_path])
+        silent_setup(name=module_name, packages=[], ext_modules=[extension], script_args=["build_ext", "-b", dir_name])
         module = utils.import_module_from_dir(module_name, dir_name)
         assert (module_path := module.__file__) is not None
         os.remove(src_path)
@@ -113,8 +125,8 @@ def compile(code: str, func_name: str, module_name: str | None = None, reuse_out
         src_path = f"{module_name}.c"
         with open(src_path, "w") as f:
             f.write(code)
-        extension = Extension(module_name, sources=[src_path], extra_compile_args=compile_flags)
-        silent_setup(name=module_name, ext_modules=[extension], script_args=["build_ext", "--inplace"])
+        extension = Extension(module_name, sources=[src_path])
+        silent_setup(name=module_name, packages=[], ext_modules=[extension], script_args=["build_ext", "--inplace"])
         module = importlib.import_module(module_name)
 
     return getattr(module, func_name)
