@@ -8,12 +8,6 @@ Sklearn-Freezer compiles scikit-learn classifiers' `predict` or `predict_proba` 
 
 **Disclaimer:** This is a simple optimization created to address performance bottlenecks from iterative scikit-learn model calls. The implementation is naive with limited model support. Currently only `predict_proba` for binary classification of `RandomForestClassifier` and `DecisionTreeClassifier` are supported.
 
-## Compilation Backends
-
-- **Python**: Pure Python implementation (baseline)
-- **Cython**: Cython-compiled implementation (significant speedup)
-- **C**: Native C extension (maximum speed)
-
 ## Installation
 
 ```bash
@@ -33,14 +27,27 @@ from sklearn.ensemble import RandomForestClassifier
 from sklearn.datasets import make_classification
 from sklearn_freezer import compile_predict_proba
 
-# Train and compile model
-X, y = make_classification(n_samples=1000, n_features=4, random_state=42)
+# Train a model
+X, y = make_classification(n_samples=1000, n_features=4, random_state=42, n_classes=2)
 clf = RandomForestClassifier(random_state=42).fit(X, y)
+
+# Compile for fast inference
 compiled_func = compile_predict_proba(clf, backend="c")
 
 # Fast single-sample prediction
 probability = compiled_func(*X[0])
 ```
+
+## Compilation Backends
+
+- **Python**: Pure Python implementation (baseline performance)
+- **Cython**: Cython-compiled implementation (significant speedup over Python)
+- **C**: Native C extension (maximum performance)
+
+## Examples
+
+- **Backend Comparison**: `example/simple_compile.py` - Compares performance across different compilation backends (Python, Cython, C)
+- **Full Benchmark**: `example/benchmark.py` - Comprehensive comparison including original scikit-learn `predict_proba` methods vs compiled versions
 
 ## Performance
 
@@ -59,4 +66,7 @@ Run benchmark: `python example/benchmark.py`
 - Python 3.10+
 - scikit-learn
 
-**Optional:** `cython`, `setuptools`
+**Optional dependencies:**
+
+- `cython` (for Cython backend)
+- `setuptools` (for C backend compilation)
