@@ -38,6 +38,21 @@ compiled_func = skf.compile(clf.predict_proba, backend="c")
 probability = compiled_func(*X[0])
 ```
 
+## Compilation Caching
+
+When you provide a `module_name` parameter to the compile function, the compiled module will be saved to the current working directory:
+
+```python
+# Compile and save with a specific name
+compiled_func = skf.compile(clf.predict_proba, backend="c", module_name="my_compiled_model")
+```
+
+This enables efficient reuse of compiled models:
+
+- If you compile again with the same `module_name`, the system first checks if the source code matches the existing file
+- If the source code is identical, it directly imports the existing compiled module without recompiling
+- If the source code differs, it recompiles the module with the updated code
+
 ## Compilation Backends
 
 - **Python**: Pure Python implementation (baseline performance)

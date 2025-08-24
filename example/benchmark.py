@@ -8,11 +8,11 @@ import sklearn_freezer as skf
 import numpy as np
 
 
-def compile_backends(clf, backends=("python", "cython", "c")) -> dict[str, Callable]:
+def compile_backends(clf, save_module_prefix: str, backends=("python", "cython", "c")) -> dict[str, Callable]:
     compiled_funcs: dict[str, Callable] = {}
     for backend in backends:
         try:
-            compiled_funcs[backend] = skf.compile(clf.predict_proba, backend)
+            compiled_funcs[backend] = skf.compile(clf.predict_proba, backend, module_name=f"{save_module_prefix}_{backend}")
             print(f"✓ Successfully compiled with {backend} backend")
         except Exception as e:
             print(f"✗ Failed to compile with {backend} backend: {e}")
@@ -74,16 +74,16 @@ if __name__ == "__main__":
     # Generate sample data
     X, y = make_classification(random_state=42, n_samples=10000, n_features=8, n_informative=7, n_redundant=1, n_classes=2)
 
-    for clf in (
-        DecisionTreeClassifier(random_state=42, max_depth=10).fit(X, y),
-        RandomForestClassifier(random_state=42, n_estimators=2, max_depth=2).fit(X, y),
-        RandomForestClassifier(random_state=42, n_estimators=500, max_depth=10).fit(X, y),
+    for save_module_prefix, clf in (
+        ("dtc_10", DecisionTreeClassifier(random_state=42, max_depth=10).fit(X, y)),
+        ("rfc_2_2", RandomForestClassifier(random_state=42, n_estimators=2, max_depth=2).fit(X, y)),
+        ("rfc_500_10", RandomForestClassifier(random_state=42, n_estimators=500, max_depth=10).fit(X, y)),
     ):
         name = clf.__class__.__name__
         print(f"\n{'=' * 20} Benchmarking {name} {'=' * 20}")
 
         # Compile predict_proba for different backends
-        compiled_funcs = compile_backends(clf)
+        compiled_funcs = compile_backends(clf, save_module_prefix=save_module_prefix)
 
         # Test single prediction
         sample = X[0]

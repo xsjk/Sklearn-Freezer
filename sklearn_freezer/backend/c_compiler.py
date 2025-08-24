@@ -15,6 +15,8 @@ class FloatCallable(Protocol):
 def silent_setup(**kwargs) -> None:
     from setuptools import setup
 
+    # Note: On Windows, MSVC output may not be fully suppressed by redirection.
+    # This function only suppresses output where redirection works.
     with open(os.devnull, "w") as null, redirect_stdout(null), redirect_stderr(null):
         setup(**kwargs)
 
@@ -109,20 +111,46 @@ def compile(code: str, func_name: str, module_name: str | None = None, reuse_out
     epilogue += "}}\n"
 
     if module_name is None:
+        # Create a temporary module
         with tempfile.NamedTemporaryFile(suffix=".c", delete=False) as f:
             dir_name, module_name, _ = utils.split_path(src_path := f.name)
             code += epilogue.format(module_name=module_name)
             f.write(code.encode())
+
+        # Compile
         extension = Extension(module_name, sources=[src_path])
         silent_setup(name=module_name, packages=[], ext_modules=[extension], script_args=["build_ext", "-b", dir_name])
-        module = utils.import_module_from_dir(module_name, dir_name)
-        assert (module_path := module.__file__) is not None
-        os.remove(src_path)
-        os.remove(module_path)
+
+        # Import and clean up
+        try:
+            module = utils.import_module_from_dir(module_name, dir_name)
+            assert (module_path := module.__file__) is not None
+            try:
+                os.remove(module_path)
+            except PermissionError:  # On Windows, the running Python process may lock the file
+                pass
+        finally:
+            os.remove(src_path)
 
     else:
-        code += epilogue.format(module_name=module_name)
+        # Check if module with identical code already exists
         src_path = f"{module_name}.c"
+        code += epilogue.format(module_name=module_name)
+        if os.path.exists(src_path):
+            try:
+                with open(src_path, "r") as f:
+                    if f.read() == code:
+                        # Use existing module if code is identical
+                        try:
+                            module = importlib.import_module(module_name)
+                            return getattr(module, func_name)
+                        except ImportError:
+                            # Module exists but can't be imported, recompile
+                            pass
+            except Exception:
+                pass  # Fall through to writing the file
+
+        # Write the C file and compile
         with open(src_path, "w") as f:
             f.write(code)
         extension = Extension(module_name, sources=[src_path])

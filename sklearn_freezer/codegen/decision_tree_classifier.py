@@ -62,7 +62,7 @@ tree_to_c = tree_to_code(
 
 
 def generate_predict_proba_python(clf: TargetModel, arg_names: list[str], func_name: str) -> str:
-    return "def {func_name}({args}):\n{code}".format(
+    return "def {func_name}({args}):\n{code}\n".format(
         func_name=func_name,
         args=", ".join(arg_names),
         code=tree_to_python(clf.tree_, arg_names, initial_depth=1),
@@ -70,7 +70,7 @@ def generate_predict_proba_python(clf: TargetModel, arg_names: list[str], func_n
 
 
 def generate_predict_proba_cython(clf: TargetModel, arg_names: list[str], func_name: str) -> str:
-    return "cpdef double {func_name}({args}) noexcept nogil:\n{code}".format(
+    return "cpdef double {func_name}({args}) noexcept nogil:\n{code}\n".format(
         func_name=func_name,
         args=", ".join(f"double {n}" for n in arg_names),
         code=tree_to_python(clf.tree_, arg_names, initial_depth=1),
@@ -78,7 +78,7 @@ def generate_predict_proba_cython(clf: TargetModel, arg_names: list[str], func_n
 
 
 def generate_predict_proba_c(clf: TargetModel, arg_names: list[str], func_name: str) -> str:
-    return "double {func_name}({args}) {{\n{code}\n}}".format(
+    return "double {func_name}({args}) {{\n{code}\n}}\n".format(
         func_name=func_name,
         args=", ".join(f"double {n}" for n in arg_names),
         code=tree_to_c(clf.tree_, arg_names, initial_depth=1),

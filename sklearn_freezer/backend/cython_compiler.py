@@ -1,4 +1,3 @@
-import importlib
 import os
 import tempfile
 from typing import Callable
@@ -56,14 +55,32 @@ def compile(code: str, func_name: str, module_name: str | None = None) -> Callab
     """
     code = f"{CYTHON_PREAMBLE}\n{code}"
     if module_name is None:
+        # Create a temporary module
         with tempfile.NamedTemporaryFile(suffix=".pyx", delete=False) as f:
             f.write(code.encode())
             src_path = f.name
+
+        # Import and clean up
         dir_name, module_name, _ = utils.split_path(src_path)
-        module = utils.import_module_from_dir(module_name, dir_name, get_pyx_importer())
-        os.remove(src_path)
+        try:
+            module = utils.import_module_from_dir(module_name, dir_name, importer=get_pyx_importer())
+        finally:
+            os.remove(src_path)
     else:
-        with open(f"{module_name}.pyx", "w") as f:
+        # Check if module with identical code already exists
+        src_path = f"{module_name}.pyx"
+        if os.path.exists(src_path):
+            try:
+                with open(src_path, "r") as f:
+                    if f.read() == code:
+                        module = utils.import_module_from_dir(module_name, importer=get_pyx_importer())
+                        return getattr(module, func_name)
+            except Exception:
+                pass  # Fall through to writing the file
+
+        # Write and import the module
+        with open(src_path, "w") as f:
             f.write(code)
-        module = importlib.import_module(module_name)
+        module = utils.import_module_from_dir(module_name, importer=get_pyx_importer())
+
     return getattr(module, func_name)

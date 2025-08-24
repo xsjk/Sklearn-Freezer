@@ -5,7 +5,7 @@ from typing import Callable, Protocol
 
 
 class BackendCompiler(Protocol):
-    def __call__(self, code: str, func_name: str) -> Callable: ...
+    def __call__(self, code: str, func_name: str, module_name: str | None = None, **kwargs) -> Callable: ...
 
 
 supported: dict[str, BackendCompiler] = {}
