@@ -4,7 +4,7 @@ from typing import Callable
 from sklearn.datasets import make_classification
 from sklearn.tree import DecisionTreeClassifier
 from sklearn.ensemble import RandomForestClassifier
-from sklearn_freezer import compile_predict_proba
+import sklearn_freezer as skf
 import numpy as np
 
 
@@ -12,7 +12,7 @@ def compile_backends(clf, backends=("python", "cython", "c")) -> dict[str, Calla
     compiled_funcs: dict[str, Callable] = {}
     for backend in backends:
         try:
-            compiled_funcs[backend] = compile_predict_proba(clf, backend)
+            compiled_funcs[backend] = skf.compile(clf.predict_proba, backend)
             print(f"✓ Successfully compiled with {backend} backend")
         except Exception as e:
             print(f"✗ Failed to compile with {backend} backend: {e}")
@@ -38,28 +38,28 @@ def benchmark_performance(clf, compiled_funcs: dict[str, Callable], sample, n_it
 
     # Benchmark original by calling predict_proba repeatedly (reduced count to avoid very long runs)
     original_loop_count = max(1, n_iterations // 100)
-    start_time = time.time()
+    start_time = time.perf_counter()
     for _ in range(original_loop_count):
         clf.predict_proba([sample])
-    original_loop_time = time.time() - start_time
+    original_loop_time = time.perf_counter() - start_time
     original_loop_per = original_loop_time / original_loop_count
     print(f"Original (loop x{original_loop_count}): {original_loop_time:.4f}s ({original_loop_per * 1000:.3f}ms per prediction)")
 
     # Benchmark original by doing a single batch call of size n_iterations
     X_batch = np.tile(sample, (n_iterations, 1))
-    start_time = time.time()
+    start_time = time.perf_counter()
     clf.predict_proba(X_batch)
-    original_batch_time = time.time() - start_time
+    original_batch_time = time.perf_counter() - start_time
     original_batch_per = original_batch_time / n_iterations
     print(f"Original (batch {n_iterations}): {original_batch_time:.4f}s ({original_batch_per * 1000:.3f}ms per prediction)")
 
     # Benchmark compiled functions (per-call)
     for backend, func in compiled_funcs.items():
         try:
-            start_time = time.time()
+            start_time = time.perf_counter()
             for _ in range(n_iterations):
                 func(*sample)
-            compiled_time = time.time() - start_time
+            compiled_time = time.perf_counter() - start_time
             compiled_per = compiled_time / n_iterations
 
             speedup_vs_loop = original_loop_per / compiled_per if compiled_per > 0 else float("inf")

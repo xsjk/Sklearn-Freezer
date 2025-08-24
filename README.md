@@ -25,14 +25,14 @@ pip install sklearn-freezer[all]     # All backends
 ```python
 from sklearn.ensemble import RandomForestClassifier
 from sklearn.datasets import make_classification
-from sklearn_freezer import compile_predict_proba
+import sklearn_freezer as skf
 
 # Train a model
 X, y = make_classification(n_samples=1000, n_features=4, random_state=42, n_classes=2)
 clf = RandomForestClassifier(random_state=42).fit(X, y)
 
 # Compile for fast inference
-compiled_func = compile_predict_proba(clf, backend="c")
+compiled_func = skf.compile(clf.predict_proba, backend="c")
 
 # Fast single-sample prediction
 probability = compiled_func(*X[0])
