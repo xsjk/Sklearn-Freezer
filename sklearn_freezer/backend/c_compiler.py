@@ -1,35 +1,4 @@
-import importlib
-import os
-import re
-import tempfile
-from contextlib import redirect_stderr, redirect_stdout
-from typing import Protocol
-
 from . import utils
-
-
-class FloatCallable(Protocol):
-    def __call__(self, *args: float) -> float: ...
-
-
-def silent_setup(**kwargs) -> None:
-    from setuptools import setup
-
-    # Note: On Windows, MSVC output may not be fully suppressed by redirection.
-    # This function only suppresses output where redirection works.
-    with open(os.devnull, "w") as null, redirect_stdout(null), redirect_stderr(null):
-        setup(**kwargs)
-
-
-def get_n_args_from_code(code: str, func_name: str, return_type: str, arg_type: str) -> int:
-    """
-    Counts the number of arguments of a specific type in the parameter list of a given
-    function name within the provided C code.
-    """
-    assert (m := re.search(rf"\b{return_type}\b\s+\b{func_name}\s*\(([^)]*)\)", code)) is not None
-    param_list = m.group(1).strip()
-    return len(re.findall(rf"\b{arg_type}\b", param_list))
-
 
 # Ignore the warning about the function signature of _PyCFunctionFast differs from PyCFunction
 C_PREAMBLE = """
@@ -44,117 +13,125 @@ C_PREAMBLE = """
 #include <Python.h>
 """
 
+DEFAULT_FUNCTION_TEMPLATE = """
+{preamble}
 
-def compile(code: str, func_name: str, module_name: str | None = None, reuse_output: bool = True) -> FloatCallable:
-    """
-    Compile the provided C code into a callable Python function.
+{code}
 
-    This function takes a string of C code, wraps it, and compiles it into a Python C extension.
-    The specified function is then exported and can be called from Python.
+#define AsDouble(o) (((PyFloatObject*)(o))->ob_fval)
+static PyObject* {func_name}_wrapper(PyObject *self, PyObject *const *args, Py_ssize_t nargs) {{
+    return PyFloat_FromDouble({func_name}({args}));
+}}
 
-    Parameters
-    ----------
-    code : str
-        The C code to compile.
-    func_name : str
-        The name of the function to export.
-    module_name : str, optional
-        The name of the module to create. If None, a temporary module is generated;
-        otherwise, the module is created in the current directory.
-    reuse_output : bool, optional
-        Determines whether to reuse the output PyObject for performance optimization.
+static PyMethodDef methods[] = {{
+    {{ "{func_name}", {func_name}_wrapper, METH_FASTCALL, NULL }},
+    {{ NULL, NULL, 0, NULL }}
+}};
 
-    Returns
-    -------
-    Any
-        The compiled function.
+static struct PyModuleDef module = {{ PyModuleDef_HEAD_INIT, "{module_name}", NULL, -1, methods }};
 
-    Notes
-    -----
-    This module is optimized for ultra-low latency. It uses METH_FASTCALL to reduce overhead
-    and omits argument validation and exception handling. Additionally, it reuses the output
-    PyObject for performance, which makes the function non-thread-safe. If thread safety is
-    required, set `reuse_output` to False.
-    """
-    try:
-        # Import setuptools dynamically to avoid requiring its installation unless C backend is used
-        from setuptools import Extension
-    except ImportError:
-        raise ImportError("setuptools is required for C compilation")
+PyMODINIT_FUNC PyInit_{module_name}(void) {{
+    return PyModule_Create(&module);
+}}
+"""
 
-    # Assume the return type is double and argument types are double
-    num_args = get_n_args_from_code(code, func_name, return_type="double", arg_type="double")
 
-    code = f"{C_PREAMBLE}\n\n{code}\n\n"
-    if reuse_output:
-        code += f"static PyObject* {func_name}_cache;\n\n"
-    code += "#define AsDouble(o) (((PyFloatObject*)(o))->ob_fval)\n"
-    code += f"static PyObject* {func_name}_wrapper(PyObject *self, PyObject *const *args, Py_ssize_t nargs) {{\n"
-    code += f"    double result = {func_name}({', '.join(f'AsDouble(args[{i}])' for i in range(num_args))});\n"
-    if reuse_output:
-        code += f"    AsDouble({func_name}_cache) = result;\n"
-        code += f"    Py_INCREF({func_name}_cache);\n"
-        code += f"    return {func_name}_cache;\n"
-    else:
-        code += "    return PyFloat_FromDouble(result);\n"
-    code += "}\n"
-    code += "static PyMethodDef MyMethods[] = {\n"
-    code += f'    {{ "{func_name}", {func_name}_wrapper, METH_FASTCALL, NULL }},\n'
-    code += "    { NULL, NULL, 0, NULL }\n"
-    code += "};\n"
+def default_wrapper(code: str, func_name: str, module_name: str) -> tuple[str, str]:
+    num_args = utils.get_n_args_from_code(code, func_name, "double", "double")
+    code = DEFAULT_FUNCTION_TEMPLATE.format(
+        preamble=C_PREAMBLE,
+        code=code,
+        func_name=func_name,
+        num_args=num_args,
+        args=", ".join(f"AsDouble(args[{i}])" for i in range(num_args)),
+        module_name=module_name,
+    )
+    return code, func_name
 
-    epilogue = 'static struct PyModuleDef {module_name} = {{ PyModuleDef_HEAD_INIT, "{module_name}", NULL, -1, MyMethods }};\n'
-    epilogue += "PyMODINIT_FUNC PyInit_{module_name}(void) {{ \n"
-    if reuse_output:
-        epilogue += f"    {func_name}_cache = PyFloat_FromDouble(0.0);\n"
-    epilogue += "    return PyModule_Create(&{module_name});\n"
-    epilogue += "}}\n"
 
-    if module_name is None:
-        # Create a temporary module
-        with tempfile.NamedTemporaryFile(suffix=".c", delete=False) as f:
-            dir_name, module_name, _ = utils.split_path(src_path := f.name)
-            code += epilogue.format(module_name=module_name)
-            f.write(code.encode())
+NUMPY_BATCH_FUNCTION_TEMPLATE = """
+{preamble}
 
-        # Compile
-        extension = Extension(module_name, sources=[src_path])
-        silent_setup(name=module_name, packages=[], ext_modules=[extension], script_args=["build_ext", "-b", dir_name])
+#define NPY_NO_DEPRECATED_API NPY_1_7_API_VERSION
+#include <numpy/arrayobject.h>
 
-        # Import and clean up
-        try:
-            module = utils.import_module_from_dir(module_name, dir_name)
-            assert (module_path := module.__file__) is not None
-            try:
-                os.remove(module_path)
-            except PermissionError:  # On Windows, the running Python process may lock the file
-                pass
-        finally:
-            os.remove(src_path)
+{code}
 
-    else:
-        # Check if module with identical code already exists
-        src_path = f"{module_name}.c"
-        code += epilogue.format(module_name=module_name)
-        if os.path.exists(src_path):
-            try:
-                with open(src_path, "r") as f:
-                    if f.read() == code:
-                        # Use existing module if code is identical
-                        try:
-                            module = importlib.import_module(module_name)
-                            return getattr(module, func_name)
-                        except ImportError:
-                            # Module exists but can't be imported, recompile
-                            pass
-            except Exception:
-                pass  # Fall through to writing the file
+static PyObject* {func_name}_wrapper(PyObject *self, PyObject *arg)
+{{
+    const PyArrayObject *arr = (const PyArrayObject *)arg;
+    if (!PyArray_Check(arr)) {{
+        PyErr_SetString(PyExc_TypeError, "Expected a numpy array");
+        return NULL;
+    }}
 
-        # Write the C file and compile
-        with open(src_path, "w") as f:
-            f.write(code)
-        extension = Extension(module_name, sources=[src_path])
-        silent_setup(name=module_name, packages=[], ext_modules=[extension], script_args=["build_ext", "--inplace"])
-        module = importlib.import_module(module_name)
+    if (PyArray_TYPE(arr) != NPY_DOUBLE) {{
+        PyErr_SetString(PyExc_TypeError, "Expected a numpy array of doubles");
+        return NULL;
+    }}
 
-    return getattr(module, func_name)
+    if (!PyArray_ISCONTIGUOUS(arr)) {{
+        PyErr_SetString(PyExc_TypeError, "Expected a contiguous numpy array");
+        return NULL;
+    }}
+
+    if (PyArray_NDIM(arr) != 2) {{
+        PyErr_SetString(PyExc_TypeError, "Expected a 2-dimensional numpy array");
+        return NULL;
+    }}
+
+    npy_intp rows = PyArray_DIM(arr, 0);
+    npy_intp cols = PyArray_DIM(arr, 1);
+    if (cols != {num_args}) {{
+        PyErr_SetString(PyExc_TypeError, "Expected a 2-dimensional numpy array with {num_args} columns");
+        return NULL;
+    }}
+
+    // Create output array
+    PyObject *out = PyArray_SimpleNew(1, &rows, NPY_DOUBLE);
+    if (!out) {{
+        return NULL;
+    }}
+
+    PyArrayObject *out_arr = (PyArrayObject *)out;
+
+    double *data = (double *)PyArray_DATA(arr);
+    double *out_data = (double *)PyArray_DATA(out_arr);
+    
+    npy_intp i = 0;
+    #pragma omp parallel for
+    for (i = 0; i < rows; i++) {{
+        double *input = data + i * cols;
+        out_data[i] = {func_name}({args});
+    }}
+    return out;
+}}
+
+static PyMethodDef methods[] = {{
+    {{ "{func_name}", {func_name}_wrapper, METH_O, NULL }},
+    {{ NULL, NULL, 0, NULL }}
+}};
+
+static struct PyModuleDef module = {{ PyModuleDef_HEAD_INIT, "{module_name}", NULL, -1, methods }};
+
+PyMODINIT_FUNC PyInit_{module_name}(void) {{
+    // Initialize the numpy array API
+    import_array();
+    return PyModule_Create(&module);
+}}
+
+"""
+
+
+def batch_wrapper_numpy(code: str, func_name: str, module_name: str) -> tuple[str, str]:
+    num_args = utils.get_n_args_from_code(code, func_name, "double", "double")
+
+    code = NUMPY_BATCH_FUNCTION_TEMPLATE.format(
+        preamble=C_PREAMBLE,
+        code=code,
+        func_name=func_name,
+        num_args=num_args,
+        args=", ".join(f"input[{i}]" for i in range(num_args)),
+        module_name=module_name,
+    )
+    return code, func_name

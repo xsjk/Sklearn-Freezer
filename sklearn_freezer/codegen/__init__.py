@@ -38,6 +38,9 @@ def get_codegen(method: MethodType, backend: str) -> CodeGen:
     CodeGen
         The code generation function for the specified method and backend.
     """
+    if not inspect.ismethod(method):
+        raise TypeError(f"Expected a method but got {type(method).__name__}")
+
     # Find the base model class that implements the method
     base_model: type = inspect._findclass(method)  # type: ignore
 

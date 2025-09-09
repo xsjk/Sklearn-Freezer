@@ -5,7 +5,7 @@ from .backend import get_compiler
 from .codegen import get_codegen
 
 
-def compile(method: MethodType, backend: Literal["python", "c", "cython"], module_name: str | None = None, **kwargs) -> Callable:
+def compile(method: MethodType, backend: Literal["python", "c", "cython"], module_name: str | None = None, batch_mode: Literal["numpy"] | None = None, **kwargs) -> Callable:
     """Compile the method of a given classifier.
 
     This function takes a classifier and compiles its method
@@ -36,5 +36,5 @@ def compile(method: MethodType, backend: Literal["python", "c", "cython"], modul
 
     # Compile the method
     code = codegen(func_name="f")
-    compiled_func = compiler(code, func_name="f", module_name=module_name, **kwargs)
+    compiled_func = compiler(code, func_name="f", module_name=module_name, batch_mode=batch_mode, **kwargs)
     return compiled_func

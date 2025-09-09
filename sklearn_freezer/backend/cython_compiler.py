@@ -1,25 +1,4 @@
-import os
-import tempfile
-from typing import Callable
-
 from . import utils
-
-pyx_importer = None
-
-
-# Import pyximport dynamically to avoid requiring its installation unless Cython backend is used
-def get_pyx_importer():
-    global pyx_importer
-    if pyx_importer is None:
-        try:
-            import pyximport
-        except ImportError:
-            raise ImportError("cython is required for Cython compilation")
-
-        _, pyx_importer = pyximport.install()
-        assert pyx_importer is not None
-    return pyx_importer
-
 
 CYTHON_PREAMBLE = """
 # cython: language_level=3
@@ -31,56 +10,33 @@ CYTHON_PREAMBLE = """
 # cython: autotestdict=False
 """
 
+NUMPY_BATCH_FUNCTION_TEMPLATE = """
+import numpy as np
+cimport numpy as cnp
+from cython import boundscheck, wraparound
+from cython.parallel import prange
 
-def compile(code: str, func_name: str, module_name: str | None = None) -> Callable:
-    """
-    Compile the given Cython code.
+cnp.import_array()
 
-    This function takes a string of Cython code and compiles it into a callable function
-    using the provided function name.
+@boundscheck(False)
+@wraparound(False)
+cpdef cnp.ndarray[cnp.float64_t, ndim=1] {func_name}_batch(cnp.ndarray[cnp.float64_t, ndim=2] X):
+    cdef cnp.float64_t[::1] y = np.empty(X.shape[0], dtype=np.float64)
+    if X.shape[1] != {num_features}:
+        raise ValueError("Input array must have {num_features} columns")
+    for i in prange(X.shape[0], nogil=True):
+        y[i] = {func_call}
+    return np.asarray(y)
+"""
 
-    Parameters
-    ----------
-    code : str
-        The Cython code to compile.
-    func_name: str
-        The name of the function to extract from the compiled module.
-    module_name : str, optional
-        The name of the module to create. When None, a temporary module is created.
-        Otherwise, the module will be created in the current directory.
 
-    Returns
-    -------
-    The compiled function.
-    """
-    code = f"{CYTHON_PREAMBLE}\n{code}"
-    if module_name is None:
-        # Create a temporary module
-        with tempfile.NamedTemporaryFile(suffix=".pyx", delete=False) as f:
-            f.write(code.encode())
-            src_path = f.name
+def default_wrapper(code: str, func_name: str, module_name: str) -> tuple[str, str]:
+    return code, func_name
 
-        # Import and clean up
-        dir_name, module_name, _ = utils.split_path(src_path)
-        try:
-            module = utils.import_module_from_dir(module_name, dir_name, importer=get_pyx_importer())
-        finally:
-            os.remove(src_path)
-    else:
-        # Check if module with identical code already exists
-        src_path = f"{module_name}.pyx"
-        if os.path.exists(src_path):
-            try:
-                with open(src_path, "r") as f:
-                    if f.read() == code:
-                        module = utils.import_module_from_dir(module_name, importer=get_pyx_importer())
-                        return getattr(module, func_name)
-            except Exception:
-                pass  # Fall through to writing the file
 
-        # Write and import the module
-        with open(src_path, "w") as f:
-            f.write(code)
-        module = utils.import_module_from_dir(module_name, importer=get_pyx_importer())
-
-    return getattr(module, func_name)
+def batch_wrapper_numpy(code: str, func_name: str, module_name: str) -> tuple[str, str]:
+    num_args = utils.get_n_args_from_code(code, func_name, "double", "double")
+    func_call = f"{func_name}({', '.join([f'X[i, {j}]' for j in range(num_args)])})"
+    batch_code = NUMPY_BATCH_FUNCTION_TEMPLATE.format(func_name=func_name, num_features=num_args, func_call=func_call)
+    code = f"{batch_code}\n\n{code}\n"
+    return code, f"{func_name}_batch"
