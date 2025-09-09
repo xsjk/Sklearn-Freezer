@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "sklearn_freezer"
-version = "0.1.0"
+version = "0.2.0"
 description = "Utility package for compiling scikit-learn classifiers for faster single-sample inference"
 authors = [{ name = "xsjk", email = "xsjk17@outlook.com" }]
 readme = "README.md"
